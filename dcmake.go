@@ -9,11 +9,14 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Shimi9999/gobms"
+	"github.com/mattn/go-lsd"
 )
 
 func main() {
@@ -44,10 +47,10 @@ func main() {
 			os.Exit(1)
 		}
 
-		rankedDirs, unmatchBmsdirs := matchEntriesByInfo(bmsdirs, entries)
-		fmt.Printf("match %d, unmatch %d\n", len(entries)-len(unmatchBmsdirs), len(unmatchBmsdirs))
+		rankedDirs, unmatchEntries, remaingingBmsdirs := matchEntriesByInfo(bmsdirs, entries)
+		fmt.Printf("match %d, unmatch %d, remaining directories %d\n", len(entries)-len(unmatchEntries), len(unmatchEntries), len(remaingingBmsdirs))
 
-		err = outputCsv(entries, rankedDirs, unmatchBmsdirs)
+		err = outputCsv(entries, rankedDirs, unmatchEntries, remaingingBmsdirs)
 		if err != nil {
 			fmt.Println("outputCsv Error: " + err.Error())
 			os.Exit(1)
@@ -100,11 +103,19 @@ func loadRankCsv(path string) ([]bmsEntryInfo, error) {
 	return entries, nil
 }
 
-func matchEntriesByInfo(bmsdirs []gobms.BmsDirectory, entries []bmsEntryInfo) ([]gobms.BmsDirectory, []gobms.BmsDirectory) {
+type unmatchEntry struct {
+	index     int
+	entryInfo bmsEntryInfo
+}
+
+func matchEntriesByInfo(bmsdirs []gobms.BmsDirectory, entries []bmsEntryInfo) ([]gobms.BmsDirectory, []unmatchEntry, []gobms.BmsDirectory) {
 	rankedDirs := make([]gobms.BmsDirectory, len(entries))
 	unmatchDirs := make([]gobms.BmsDirectory, len(bmsdirs))
 	copy(unmatchDirs, bmsdirs)
+	tmpUnmatchEntries := []unmatchEntry{}
+	unmatchEntries := []unmatchEntry{}
 
+	// タイトル、ジャンル、アーティストの一致でマッチング
 	for i, entry := range entries {
 		maxMatchLevel := 0
 		matchDirIndex := -1
@@ -125,22 +136,62 @@ func matchEntriesByInfo(bmsdirs []gobms.BmsDirectory, entries []bmsEntryInfo) ([
 			}
 		}
 
-		if matchDirIndex != -1 {
+		if matchDirIndex == -1 {
+			tmpUnmatchEntries = append(tmpUnmatchEntries, unmatchEntry{i, entry})
+		} else {
 			rankedDirs[i] = unmatchDirs[matchDirIndex]
 			if matchDirIndex == len(unmatchDirs)-1 {
 				unmatchDirs = unmatchDirs[:matchDirIndex]
 			} else {
 				unmatchDirs = append(unmatchDirs[:matchDirIndex], unmatchDirs[matchDirIndex+1:]...)
 			}
-			tmp := make([]gobms.BmsDirectory, len(unmatchDirs))
-			copy(tmp, unmatchDirs)
 		}
 	}
 
-	return rankedDirs, unmatchDirs
+	// マッチしなかったものを条件を緩くして再マッチング
+	for _, _unmatchEntry := range tmpUnmatchEntries {
+		entry := _unmatchEntry.entryInfo
+		maxMatchLevel := 0
+		matchDirIndex := -1
+		for j, dir := range unmatchDirs {
+			matchLevel := 0
+			// 標準化したレーベンシュタイン距離でタイトルの類似度を比較
+			distance := lsd.StringDistance(dir.Name, entry.title)
+			longerTitleLength := math.Max(float64(utf8.RuneCountInString(dir.Name)), float64(utf8.RuneCountInString(entry.title)))
+			NormalizedDistance := float64(distance) / longerTitleLength
+			if NormalizedDistance <= 0.5 {
+				matchLevel += 4
+			}
+			if len(dir.BmsDataSet) > 0 {
+				if strings.HasPrefix(dir.BmsDataSet[0].Genre, entry.genre) {
+					matchLevel += 1
+				}
+				if strings.HasPrefix(dir.BmsDataSet[0].Artist, entry.artist) {
+					matchLevel += 2
+				}
+			}
+			if matchLevel > 1 && matchLevel > maxMatchLevel {
+				matchDirIndex = j
+				maxMatchLevel = matchLevel
+			}
+		}
+
+		if matchDirIndex == -1 {
+			unmatchEntries = append(unmatchEntries, _unmatchEntry)
+		} else {
+			rankedDirs[_unmatchEntry.index] = unmatchDirs[matchDirIndex]
+			if matchDirIndex == len(unmatchDirs)-1 {
+				unmatchDirs = unmatchDirs[:matchDirIndex]
+			} else {
+				unmatchDirs = append(unmatchDirs[:matchDirIndex], unmatchDirs[matchDirIndex+1:]...)
+			}
+		}
+	}
+
+	return rankedDirs, unmatchEntries, unmatchDirs
 }
 
-func outputCsv(entries []bmsEntryInfo, rankedDirs []gobms.BmsDirectory, unmatchDirs []gobms.BmsDirectory) error {
+func outputCsv(entries []bmsEntryInfo, rankedDirs []gobms.BmsDirectory, unmatchEntries []unmatchEntry, remainingBmsDirs []gobms.BmsDirectory) error {
 	records := [][]string{}
 
 	for i, entry := range entries {
@@ -152,9 +203,13 @@ func outputCsv(entries []bmsEntryInfo, rankedDirs []gobms.BmsDirectory, unmatchD
 			[]string{fmt.Sprintf("%d", i+1), entry.title, name, rankedDirs[i].Path})
 	}
 
-	records = append(records, []string{"---Unmatch bms directories---", "", "", ""})
+	records = append(records, []string{"---Unmatch bms Entries---", "", "", ""})
+	for _, entry := range unmatchEntries {
+		records = append(records, []string{fmt.Sprintf("%d", entry.index), entry.entryInfo.title, "###Unmatch###", ""})
+	}
 
-	for _, dir := range unmatchDirs {
+	records = append(records, []string{"---Remaining bms directories---", "", "", ""})
+	for _, dir := range remainingBmsDirs {
 		records = append(records, []string{"", "", dir.Name, dir.Path})
 	}
 
@@ -173,7 +228,7 @@ func outputCsv(entries []bmsEntryInfo, rankedDirs []gobms.BmsDirectory, unmatchD
 	if err != nil {
 		return fmt.Errorf("csv file write: %w", err)
 	}
-	fmt.Println("Done : rankOutput.csv made")
+	fmt.Println("Done: rankOutput.csv generated.")
 
 	return nil
 }

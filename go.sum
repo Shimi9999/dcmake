@@ -1,4 +1,6 @@
 github.com/Shimi9999/gobms v0.0.0-20241005122424-a186d7d4a3d4 h1:3f6KiYEPraUmBM6mkHg7NRokBgxyTvNL3EI333Xxv5Q=
 github.com/Shimi9999/gobms v0.0.0-20241005122424-a186d7d4a3d4/go.mod h1:cXUkYUTYlI9oZWvYmQUQLsn2L5rudhc/7VfbMYF0+IE=
+github.com/mattn/go-lsd v0.0.0-20220520055435-3091e5768f5e h1:jNjvy9N3RbgeskU6m6tRXEdyFRvuTi44TV95L6P2cT0=
+github.com/mattn/go-lsd v0.0.0-20220520055435-3091e5768f5e/go.mod h1:S8/v7Vp+DWtN9Jh6bIp7XzNfdTNylumKJFQXFI8mM4Y=
 golang.org/x/text v0.3.7 h1:olpwvP2KacW1ZWvsR7uQhoyTYvKAupfQrRGBFM352Gk=
 golang.org/x/text v0.3.7/go.mod h1:u+2+/6zg+i71rQMx5EYifcz6MCKuco9NR6JIITiCfzQ=
