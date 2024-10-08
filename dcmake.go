@@ -112,32 +112,71 @@ func matchEntriesByInfo(bmsdirs []gobms.BmsDirectory, entries []bmsEntryInfo) ([
 	rankedDirs := make([]gobms.BmsDirectory, len(entries))
 	unmatchDirs := make([]gobms.BmsDirectory, len(bmsdirs))
 	copy(unmatchDirs, bmsdirs)
-	tmpUnmatchEntries := []unmatchEntry{}
 	unmatchEntries := []unmatchEntry{}
 
-	// タイトル、ジャンル、アーティストの一致でマッチング
+	type matchedDirDistances struct {
+		titleDistance  float64
+		genreDistance  float64
+		artistDistance float64
+	}
+
+	// タイトル、ジャンル、アーティストの一致度合でマッチング
+	// 標準化したレーベンシュタイン距離を利用
 	for i, entry := range entries {
 		maxMatchLevel := 0
 		matchDirIndex := -1
 		for j, dir := range unmatchDirs {
-			matchLevel := 0
-			if strings.HasPrefix(dir.Name, entry.title) {
-				matchLevel = 1
-				if strings.HasPrefix(dir.BmsDataSet[0].Genre, entry.genre) {
-					matchLevel = 2
-					if strings.HasPrefix(dir.BmsDataSet[0].Artist, entry.artist) {
-						matchLevel = 3
-					}
-				}
+			if dir.Name == "" || entry.title == "" || len(dir.BmsDataSet) == 0 {
+				continue
 			}
-			if matchLevel > maxMatchLevel {
+
+			matchLevel := 0
+			pureDirName := gobms.RemoveSuffixChartName(dir.Name)
+			matchedDir := matchedDirDistances{
+				normalizedLevenshteinDistance(pureDirName, entry.title),
+				normalizedLevenshteinDistance(dir.BmsDataSet[0].Genre, entry.genre),
+				normalizedLevenshteinDistance(dir.BmsDataSet[0].Artist, entry.artist),
+			}
+
+			if matchedDir.titleDistance+matchedDir.genreDistance+matchedDir.artistDistance == 0 { // 完全一致
+				matchDirIndex = j
+				break
+			}
+			if matchedDir.titleDistance < 0.1 && matchedDir.genreDistance < 0.1 && matchedDir.artistDistance < 0.1 { // ほぼ全一致
+				matchLevel = 1000
+			} else if matchedDir.titleDistance < 0.1 && matchedDir.artistDistance < 0.1 { // titleほぼ一致 & artistほぼ一致
+				matchLevel = 100
+			} else if (strings.HasPrefix(dir.Name, entry.title) || strings.HasPrefix(entry.title, pureDirName)) && matchedDir.titleDistance < 0.5 &&
+				(strings.HasPrefix(dir.BmsDataSet[0].Genre, entry.genre) || strings.HasPrefix(entry.genre, dir.BmsDataSet[0].Genre)) && matchedDir.genreDistance < 0.8 &&
+				(strings.HasPrefix(dir.BmsDataSet[0].Artist, entry.artist) || strings.HasPrefix(entry.artist, dir.BmsDataSet[0].Artist)) && matchedDir.artistDistance < 0.8 { // 全て先頭一致 & 全てあいまい一致
+				matchLevel = 7
+			} else if (strings.HasPrefix(dir.Name, entry.title) || strings.HasPrefix(entry.title, pureDirName) || matchedDir.titleDistance < 0.5) &&
+				(matchedDir.genreDistance < 0.1 && matchedDir.artistDistance < 0.7 ||
+					matchedDir.genreDistance < 0.7 && matchedDir.artistDistance < 0.1) { // title先頭一致かあいまい一致 & genre,artist片方ほぼ一致、もう片方あいまい一致
+				matchLevel = 6
+			} else if matchedDir.titleDistance < 0.1 && matchedDir.genreDistance < 0.1 { // titleほぼ一致 & genreほぼ一致
+				matchLevel = 5
+			} else if matchedDir.titleDistance < 0.1 && countPrefixMatch(dir.BmsDataSet[0].Artist, entry.artist) >= 3 { // title & artist先頭3文字一致
+				matchLevel = 4
+			} else if matchedDir.titleDistance < 0.2 && matchedDir.genreDistance < 0.1 { // titleあいまい一致 & genreほぼ一致
+				matchLevel = 3
+			} else if matchedDir.titleDistance == 0 { // title一致
+				matchLevel = 2
+			} else if (matchedDir.genreDistance < 0.1 || matchedDir.artistDistance < 0.1) &&
+				countPrefixMatch(dir.Name, entry.title) >= 3 &&
+				countPrefixMatch(dir.BmsDataSet[0].Genre, entry.genre) >= 3 &&
+				countPrefixMatch(dir.BmsDataSet[0].Artist, entry.artist) >= 3 { // genreかartist & 全て先頭3文字一致
+				matchLevel = 1
+			}
+
+			if matchLevel > 0 && matchLevel > maxMatchLevel {
 				matchDirIndex = j
 				maxMatchLevel = matchLevel
 			}
 		}
 
 		if matchDirIndex == -1 {
-			tmpUnmatchEntries = append(tmpUnmatchEntries, unmatchEntry{i, entry})
+			unmatchEntries = append(unmatchEntries, unmatchEntry{i, entry})
 		} else {
 			rankedDirs[i] = unmatchDirs[matchDirIndex]
 			if matchDirIndex == len(unmatchDirs)-1 {
@@ -148,47 +187,24 @@ func matchEntriesByInfo(bmsdirs []gobms.BmsDirectory, entries []bmsEntryInfo) ([
 		}
 	}
 
-	// マッチしなかったものを条件を緩くして再マッチング
-	for _, _unmatchEntry := range tmpUnmatchEntries {
-		entry := _unmatchEntry.entryInfo
-		maxMatchLevel := 0
-		matchDirIndex := -1
-		for j, dir := range unmatchDirs {
-			matchLevel := 0
-			// 標準化したレーベンシュタイン距離でタイトルの類似度を比較
-			distance := lsd.StringDistance(dir.Name, entry.title)
-			longerTitleLength := math.Max(float64(utf8.RuneCountInString(dir.Name)), float64(utf8.RuneCountInString(entry.title)))
-			NormalizedDistance := float64(distance) / longerTitleLength
-			if NormalizedDistance <= 0.5 {
-				matchLevel += 4
-			}
-			if len(dir.BmsDataSet) > 0 {
-				if strings.HasPrefix(dir.BmsDataSet[0].Genre, entry.genre) {
-					matchLevel += 1
-				}
-				if strings.HasPrefix(dir.BmsDataSet[0].Artist, entry.artist) {
-					matchLevel += 2
-				}
-			}
-			if matchLevel > 1 && matchLevel > maxMatchLevel {
-				matchDirIndex = j
-				maxMatchLevel = matchLevel
-			}
-		}
+	return rankedDirs, unmatchEntries, unmatchDirs
+}
 
-		if matchDirIndex == -1 {
-			unmatchEntries = append(unmatchEntries, _unmatchEntry)
-		} else {
-			rankedDirs[_unmatchEntry.index] = unmatchDirs[matchDirIndex]
-			if matchDirIndex == len(unmatchDirs)-1 {
-				unmatchDirs = unmatchDirs[:matchDirIndex]
-			} else {
-				unmatchDirs = append(unmatchDirs[:matchDirIndex], unmatchDirs[matchDirIndex+1:]...)
-			}
+func normalizedLevenshteinDistance(str1, str2 string) float64 {
+	distance := lsd.StringDistance(strings.ToLower(str1), strings.ToLower(str2))
+	longerTitleLength := math.Max(float64(utf8.RuneCountInString(str1)), float64(utf8.RuneCountInString(str2)))
+	normalizedDistance := float64(distance) / longerTitleLength
+	return normalizedDistance
+}
+
+func countPrefixMatch(str1, str2 string) int {
+	i := 0
+	for ; i < utf8.RuneCountInString(str1); i++ {
+		if string([]rune(str1)[i:i+1]) != string([]rune(str2)[i:i+1]) {
+			break
 		}
 	}
-
-	return rankedDirs, unmatchEntries, unmatchDirs
+	return i
 }
 
 func outputCsv(entries []bmsEntryInfo, rankedDirs []gobms.BmsDirectory, unmatchEntries []unmatchEntry, remainingBmsDirs []gobms.BmsDirectory) error {
