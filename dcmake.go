@@ -33,6 +33,14 @@ func main() {
 
 		dirpath := flag.Arg(0)
 		rankpath := flag.Arg(1)
+		if _, err := os.Stat(dirpath); err != nil {
+			fmt.Println("Bms rootdir path Error: " + err.Error())
+			os.Exit(1)
+		}
+		if _, err := os.Stat(rankpath); err != nil {
+			fmt.Println("Rank csv path Error: " + err.Error())
+			os.Exit(1)
+		}
 
 		bmsdirs := make([]gobms.BmsDirectory, 0)
 		err := gobms.FindBmsInDirectory(dirpath, &bmsdirs)
@@ -50,10 +58,20 @@ func main() {
 		rankedDirs, unmatchEntries, remaingingBmsdirs := matchEntriesByInfo(bmsdirs, entries)
 		fmt.Printf("match %d, unmatch %d, remaining directories %d\n", len(entries)-len(unmatchEntries), len(unmatchEntries), len(remaingingBmsdirs))
 
-		err = outputCsv(entries, rankedDirs, unmatchEntries, remaingingBmsdirs)
-		if err != nil {
-			fmt.Println("outputCsv Error: " + err.Error())
-			os.Exit(1)
+		if len(rankedDirs) > 0 && len(unmatchEntries) == 0 {
+			rankedPathes := make([]string, len(rankedDirs))
+			for i, dir := range rankedDirs {
+				rankedPathes[i] = dir.Path
+			}
+			if err := outputCource(rankedPathes); err != nil {
+				fmt.Println("outputCource Error: " + err.Error())
+				os.Exit(1)
+			}
+		} else {
+			if err := outputCsv(entries, rankedDirs, unmatchEntries, remaingingBmsdirs); err != nil {
+				fmt.Println("outputCsv Error: " + err.Error())
+				os.Exit(1)
+			}
 		}
 	} else {
 		bmsDirPaths, err := loadAllMatchedCsv(*all)
@@ -62,8 +80,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		err = outputCource(bmsDirPaths)
-		if err != nil {
+		if err := outputCource(bmsDirPaths); err != nil {
 			fmt.Println("outputCource Error: " + err.Error())
 			os.Exit(1)
 		}
@@ -219,14 +236,18 @@ func outputCsv(entries []bmsEntryInfo, rankedDirs []gobms.BmsDirectory, unmatchE
 			[]string{fmt.Sprintf("%d", i+1), entry.title, name, rankedDirs[i].Path})
 	}
 
-	records = append(records, []string{"---Unmatch bms Entries---", "", "", ""})
-	for _, entry := range unmatchEntries {
-		records = append(records, []string{fmt.Sprintf("%d", entry.index), entry.entryInfo.title, "###Unmatch###", ""})
-	}
+	if len(unmatchEntries) > 0 {
+		records = append(records, []string{"---Unmatch bms Entries---", "", "", ""})
+		for _, entry := range unmatchEntries {
+			records = append(records, []string{fmt.Sprintf("%d", entry.index+1), entry.entryInfo.title, "###Unmatch###", ""})
+		}
 
-	records = append(records, []string{"---Remaining bms directories---", "", "", ""})
-	for _, dir := range remainingBmsDirs {
-		records = append(records, []string{"", "", dir.Name, dir.Path})
+		if len(remainingBmsDirs) > 0 {
+			records = append(records, []string{"---Remaining bms directories---", "", "", ""})
+			for _, dir := range remainingBmsDirs {
+				records = append(records, []string{"", "", dir.Name, dir.Path})
+			}
+		}
 	}
 
 	csvbuf := new(bytes.Buffer)
@@ -312,7 +333,7 @@ func outputCource(paths []string) error {
 
 	var courses []Course
 	var cBmses []CourseBms
-	start := len(paths) + 1
+	start := len(paths)
 	for i := len(paths) - 1; i >= 0; i-- {
 		bmsdir, err := gobms.LoadBmsInDirectory(paths[i])
 		if err != nil {
