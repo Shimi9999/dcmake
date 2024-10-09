@@ -56,7 +56,7 @@ func main() {
 		}
 
 		rankedDirs, unmatchEntries, remaingingBmsdirs := matchEntriesByInfo(bmsdirs, entries)
-		fmt.Printf("match %d, unmatch %d, remaining directories %d\n", len(entries)-len(unmatchEntries), len(unmatchEntries), len(remaingingBmsdirs))
+		fmt.Printf("match %d, unmatch %d, remaining bms directories %d\n", len(entries)-len(unmatchEntries), len(unmatchEntries), len(remaingingBmsdirs))
 
 		if len(rankedDirs) > 0 && len(unmatchEntries) == 0 {
 			rankedPathes := make([]string, len(rankedDirs))
