@@ -1,6 +1,9 @@
 # dcmake (digest course make)
 BMSダイジェスト撮影用のbeatorajaコースファイルを作成します。
 
+- Another譜面を優先してコースに使用します。
+- コースは50曲ごとに分割して作成します。
+
 ## Usage
 ```
 dcmake {<bms rootdir path> <rank csv path> | -all <all matched csv path>}
